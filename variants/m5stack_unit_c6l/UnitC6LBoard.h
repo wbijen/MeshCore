@@ -18,6 +18,7 @@
 #define PI4IO_REG_IN_DEF_STA  0x09
 #define PI4IO_REG_PULL_EN     0x0B
 #define PI4IO_REG_PULL_SEL    0x0D
+#define PI4IO_REG_IN_STA      0x0F
 #define PI4IO_REG_INT_MASK    0x11
 #define PI4IO_REG_IRQ_STA     0x13
 

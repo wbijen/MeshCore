@@ -9,10 +9,26 @@
 #include <helpers/AutoDiscoverRTCClock.h>
 #include <helpers/SensorManager.h>
 
+#ifdef DISPLAY_CLASS
+  #include <helpers/ui/SSD1306SPIDisplay.h>
+#endif
+
+#ifdef PIN_USER_BTN
+  #include <helpers/ui/I2CExpanderButton.h>
+#endif
+
 extern UnitC6LBoard board;
 extern WRAPPER_CLASS radio_driver;
 extern AutoDiscoverRTCClock rtc_clock;
 extern SensorManager sensors;
+
+#ifdef DISPLAY_CLASS
+  extern DISPLAY_CLASS display;
+#endif
+
+#ifdef PIN_USER_BTN
+  extern I2CExpanderButton user_btn;
+#endif
 
 bool radio_init();
 uint32_t radio_get_rng_seed();

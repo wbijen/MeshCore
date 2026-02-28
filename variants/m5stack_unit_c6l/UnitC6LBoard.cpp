@@ -12,6 +12,15 @@ UnitC6LBoard board;
 
 WRAPPER_CLASS radio_driver(radio, board);
 
+#ifdef DISPLAY_CLASS
+  DISPLAY_CLASS display(&spi, PIN_OLED_DC, PIN_OLED_RST, PIN_OLED_CS,
+                        P_LORA_SCLK, P_LORA_MISO, P_LORA_MOSI);
+#endif
+
+#ifdef PIN_USER_BTN
+  I2CExpanderButton user_btn(Wire, PI4IO_ADDR, 0, 1000);  // P0 button, 1s long press
+#endif
+
 ESP32RTCClock fallback_clock;
 AutoDiscoverRTCClock rtc_clock(fallback_clock);
 SensorManager sensors;
