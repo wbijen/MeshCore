@@ -12,6 +12,7 @@ class SSD1306SPIDisplay : public DisplayDriver {
   int8_t _sclk, _miso, _mosi;
   bool _isOn;
   uint8_t _color;
+  int _fontBaseline;  // baseline offset for custom GFX fonts (0 for built-in)
 
 public:
   SSD1306SPIDisplay(SPIClass* spi, int8_t dc_pin, int8_t rst_pin, int8_t cs_pin,
@@ -19,7 +20,8 @@ public:
                     uint8_t w = 64, uint8_t h = 48)
     : DisplayDriver(w, h),
       display(w, h, spi, dc_pin, rst_pin, cs_pin, 8000000UL),
-      _spi(spi), _sclk(sclk), _miso(miso), _mosi(mosi)
+      _spi(spi), _sclk(sclk), _miso(miso), _mosi(mosi),
+      _fontBaseline(0)
   {
     _isOn = false;
   }

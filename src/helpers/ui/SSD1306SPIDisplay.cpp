@@ -11,8 +11,22 @@ bool SSD1306SPIDisplay::begin() {
 #ifdef DISPLAY_ROTATION
   display.setRotation(DISPLAY_ROTATION);
 #endif
+
+  _fontBaseline = 0;  // built-in font uses top-left positioning
+
   // periphBegin=false: we already initialized SPI above with correct pins
-  return display.begin(SSD1306_SWITCHCAPVCC, 0, true, false);
+  bool ok = display.begin(SSD1306_SWITCHCAPVCC, 0, true, false);
+
+  // Adafruit library lacks specific 64x48 init — fix COM pin config
+  // (matches Meshtastic's OLEDDisplay GEOMETRY_64_48 init sequence)
+  if (ok && width() <= 64) {
+    display.ssd1306_command(SSD1306_SETCOMPINS);
+    display.ssd1306_command(0x12);        // alternative COM pin config
+    display.ssd1306_command(SSD1306_SETCONTRAST);
+    display.ssd1306_command(0xCF);        // higher contrast for small display
+  }
+
+  return ok;
 }
 
 void SSD1306SPIDisplay::turnOn() {
@@ -37,7 +51,9 @@ void SSD1306SPIDisplay::startFrame(Color bkg) {
   _color = SSD1306_WHITE;
   display.setTextColor(_color);
   display.setTextSize(1);
-  display.cp437(true);
+  if (_fontBaseline == 0) {
+    display.cp437(true);  // only relevant for built-in font
+  }
 }
 
 void SSD1306SPIDisplay::setTextSize(int sz) {
@@ -50,7 +66,9 @@ void SSD1306SPIDisplay::setColor(Color c) {
 }
 
 void SSD1306SPIDisplay::setCursor(int x, int y) {
-  display.setCursor(x, y);
+  // Custom GFX fonts use baseline positioning; offset y so callers
+  // can use top-left coordinates consistently across all displays.
+  display.setCursor(x, y + _fontBaseline);
 }
 
 void SSD1306SPIDisplay::print(const char* str) {
