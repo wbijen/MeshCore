@@ -19,6 +19,10 @@
 
 #define LONG_PRESS_MILLIS   1200
 
+#ifndef UI_RECENT_LIST_SIZE
+  #define UI_RECENT_LIST_SIZE 4
+#endif
+
 #ifndef BATT_MIN_MILLIVOLTS
   #define BATT_MIN_MILLIVOLTS 3000
 #endif
@@ -26,9 +30,12 @@
   #define BATT_MAX_MILLIVOLTS 4200
 #endif
 
-#ifndef UI_RECENT_LIST_SIZE
-  #define UI_RECENT_LIST_SIZE 4
-#endif
+static int batteryPercent(uint16_t mv) {
+  int pct = ((mv - BATT_MIN_MILLIVOLTS) * 100) / (BATT_MAX_MILLIVOLTS - BATT_MIN_MILLIVOLTS);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return pct;
+}
 
 #if UI_HAS_JOYSTICK
   #define PRESS_LABEL "press Enter"
@@ -59,28 +66,20 @@ public:
   }
 
   int render(DisplayDriver& display) override {
-    bool small = display.width() <= 64;
-    if (small) {
-      display.setColor(DisplayDriver::BLUE);
-      display.setTextSize(1);
-      display.drawTextCentered(display.width()/2, 3, "MeshCore");
-      display.setColor(DisplayDriver::LIGHT);
-      display.drawTextCentered(display.width()/2, 18, _version_info);
-      display.drawTextCentered(display.width()/2, 30, FIRMWARE_BUILD_DATE);
-    } else {
-      // meshcore logo
-      display.setColor(DisplayDriver::BLUE);
-      int logoWidth = 128;
-      display.drawXbm((display.width() - logoWidth) / 2, 3, meshcore_logo, logoWidth, 13);
+    const bool small = (display.width() <= 64);
 
-      // version info
-      display.setColor(DisplayDriver::LIGHT);
-      display.setTextSize(2);
-      display.drawTextCentered(display.width()/2, 22, _version_info);
+    // meshcore logo — on small screens, draw at negative x to show center portion
+    display.setColor(DisplayDriver::BLUE);
+    int logoWidth = 128;
+    display.drawXbm((display.width() - logoWidth) / 2, small ? 0 : 3, meshcore_logo, logoWidth, 13);
 
-      display.setTextSize(1);
-      display.drawTextCentered(display.width()/2, 42, FIRMWARE_BUILD_DATE);
-    }
+    // version info
+    display.setColor(DisplayDriver::LIGHT);
+    display.setTextSize(small ? 1 : 2);
+    display.drawTextCentered(display.width() / 2, small ? 16 : 22, _version_info);
+
+    display.setTextSize(1);
+    display.drawTextCentered(display.width() / 2, small ? 28 : 42, FIRMWARE_BUILD_DATE);
 
     return 1000;
   }
@@ -93,7 +92,6 @@ public:
 };
 
 class HomeScreen : public UIScreen {
-protected:
   enum HomePage {
     FIRST,
     RECENT,
@@ -119,39 +117,62 @@ protected:
   AdvertPath recent[UI_RECENT_LIST_SIZE];
 
 
-  static int batteryPercent(uint16_t milliVolts) {
-    if (milliVolts <= BATT_MIN_MILLIVOLTS) return 0;
-    if (milliVolts >= BATT_MAX_MILLIVOLTS) return 100;
-    return ((int)milliVolts - BATT_MIN_MILLIVOLTS) * 100 / (BATT_MAX_MILLIVOLTS - BATT_MIN_MILLIVOLTS);
+  void drawPageIcon(DisplayDriver& display, const char* text, const uint8_t* icon,
+                    bool small, int contentY, int lineH) {
+    if (small) {
+      display.drawTextCentered(display.width() / 2, contentY + lineH, text);
+    } else {
+      display.drawXbm((display.width() - 32) / 2, 18, icon, 32, 32);
+    }
   }
 
-  void renderBatteryIndicator(DisplayDriver& display, uint16_t batteryMilliVolts) {
-    int batteryPercentage = batteryPercent(batteryMilliVolts);
+  void drawFooterAction(DisplayDriver& display, const char* label, bool small, int footerY, int lineH) {
+    if (small) {
+      display.drawTextCentered(display.width() / 2, footerY - lineH, label);
+      display.drawTextCentered(display.width() / 2, footerY, PRESS_LABEL);
+    } else {
+      char tmp[40];
+      snprintf(tmp, sizeof(tmp), "%s " PRESS_LABEL, label);
+      display.drawTextCentered(display.width() / 2, footerY, tmp);
+    }
+  }
 
-    // battery icon
-    int iconWidth = 24;
-    int iconHeight = 10;
-    int iconX = display.width() - iconWidth - 5; // Position the icon near the top-right corner
-    int iconY = 0;
+  void renderBatteryIndicator(DisplayDriver& display, uint16_t batteryMilliVolts, bool small) {
+    int pct = batteryPercent(batteryMilliVolts);
     display.setColor(DisplayDriver::GREEN);
 
-    // battery outline
-    display.drawRect(iconX, iconY, iconWidth, iconHeight);
-
-    // battery "cap"
-    display.fillRect(iconX + iconWidth, iconY + (iconHeight / 4), 3, iconHeight / 2);
-
-    // fill the battery based on the percentage
-    int fillWidth = (batteryPercentage * (iconWidth - 4)) / 100;
-    display.fillRect(iconX + 2, iconY + 2, fillWidth, iconHeight - 4);
-
-    // show muted icon if buzzer is muted
+    if (small) {
+      // text-only battery: right-aligned "XX%" at top
+      char buf[5];
+      sprintf(buf, "%d%%", pct);
+      display.drawTextRightAlign(display.width() - 1, 0, buf);
 #ifdef PIN_BUZZER
-    if (_task->isBuzzerQuiet()) {
-      display.setColor(DisplayDriver::RED);
-      display.drawXbm(iconX - 9, iconY + 1, muted_icon, 8, 8);
-    }
+      if (_task->isBuzzerQuiet()) {
+        display.setColor(DisplayDriver::RED);
+        int tw = display.getTextWidth(buf);
+        display.drawXbm(display.width() - tw - 10, 1, muted_icon, 8, 8);
+      }
 #endif
+    } else {
+      // battery icon
+      int iconWidth = 24;
+      int iconHeight = 10;
+      int iconX = display.width() - iconWidth - 5;
+      int iconY = 0;
+
+      display.drawRect(iconX, iconY, iconWidth, iconHeight);
+      display.fillRect(iconX + iconWidth, iconY + (iconHeight / 4), 3, iconHeight / 2);
+
+      int fillWidth = (pct * (iconWidth - 4)) / 100;
+      display.fillRect(iconX + 2, iconY + 2, fillWidth, iconHeight - 4);
+
+#ifdef PIN_BUZZER
+      if (_task->isBuzzerQuiet()) {
+        display.setColor(DisplayDriver::RED);
+        display.drawXbm(iconX - 9, iconY + 1, muted_icon, 8, 8);
+      }
+#endif
+    }
   }
 
   CayenneLPP sensors_lpp;
@@ -183,7 +204,7 @@ protected:
 
 public:
   HomeScreen(UITask* task, mesh::RTCClock* rtc, SensorManager* sensors, NodePrefs* node_prefs)
-     : _task(task), _rtc(rtc), _sensors(sensors), _node_prefs(node_prefs), _page(0),
+     : _task(task), _rtc(rtc), _sensors(sensors), _node_prefs(node_prefs), _page(0), 
        _shutdown_init(false), sensors_lpp(200) {  }
 
   void poll() override {
@@ -194,58 +215,70 @@ public:
 
   int render(DisplayDriver& display) override {
     char tmp[80];
-    // node name
+
+    // --- layout constants ---
+    const bool small = (display.width() <= 64);
+    const int contentY = small ? 13 : 20;   // where content starts (below header)
+    const int lineH    = small ? 9  : 11;   // vertical spacing between lines
+    const int footerY  = display.height() - 9; // bottom-anchored labels
+    const int dotSpacing = small ? 6 : 10;
+
+    // --- header: node name (skip on small screens to save space) ---
     display.setTextSize(1);
     display.setColor(DisplayDriver::GREEN);
-    char filtered_name[sizeof(_node_prefs->node_name)];
-    display.translateUTF8ToBlocks(filtered_name, _node_prefs->node_name, sizeof(filtered_name));
-    display.setCursor(0, 0);
-    display.print(filtered_name);
+    if (!small) {
+      char filtered_name[sizeof(_node_prefs->node_name)];
+      display.translateUTF8ToBlocks(filtered_name, _node_prefs->node_name, sizeof(filtered_name));
+      display.setCursor(0, 0);
+      display.print(filtered_name);
+    }
 
-    // battery voltage
-    renderBatteryIndicator(display, _task->getBattMilliVolts());
+    // --- header: battery ---
+    renderBatteryIndicator(display, _task->getBattMilliVolts(), small);
 
-    // curr page indicator
-    int y = 14;
-    int x = display.width() / 2 - 5 * (HomePage::Count-1);
-    for (uint8_t i = 0; i < HomePage::Count; i++, x += 10) {
+    // --- page dots ---
+    int dotY = small ? 9 : 14;
+    int dotX = display.width() / 2 - (dotSpacing / 2) * (HomePage::Count - 1);
+    for (uint8_t i = 0; i < HomePage::Count; i++, dotX += dotSpacing) {
       if (i == _page) {
-        display.fillRect(x-1, y-1, 3, 3);
+        display.fillRect(dotX - 1, dotY - 1, 3, 3);
       } else {
-        display.fillRect(x, y, 1, 1);
+        display.fillRect(dotX, dotY, 1, 1);
       }
     }
 
+    // --- pages ---
     if (_page == HomePage::FIRST) {
       display.setColor(DisplayDriver::YELLOW);
-      display.setTextSize(2);
+      display.setTextSize(small ? 1 : 2);
       sprintf(tmp, "MSG: %d", _task->getMsgCount());
-      display.drawTextCentered(display.width() / 2, 20, tmp);
+      display.drawTextCentered(display.width() / 2, contentY, tmp);
 
       #ifdef WIFI_SSID
         IPAddress ip = WiFi.localIP();
         snprintf(tmp, sizeof(tmp), "IP: %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
         display.setTextSize(1);
-        display.drawTextCentered(display.width() / 2, display.height() - 10, tmp);
+        display.drawTextCentered(display.width() / 2, footerY, tmp);
       #endif
       if (_task->hasConnection()) {
         display.setColor(DisplayDriver::GREEN);
         display.setTextSize(1);
-        display.drawTextCentered(display.width() / 2, 43, "< Connected >");
-
-      } else if (the_mesh.getBLEPin() != 0) { // BT pin
+        display.drawTextCentered(display.width() / 2, contentY + lineH, "< Connected >");
+      } else if (the_mesh.getBLEPin() != 0) {
         display.setColor(DisplayDriver::RED);
-        display.setTextSize(2);
+        display.setTextSize(small ? 1 : 2);
         sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
-        display.drawTextCentered(display.width() / 2, 43, tmp);
+        display.drawTextCentered(display.width() / 2, contentY + lineH, tmp);
       }
+
     } else if (_page == HomePage::RECENT) {
       the_mesh.getRecentlyHeard(recent, UI_RECENT_LIST_SIZE);
       display.setColor(DisplayDriver::GREEN);
-      int y = 20;
-      for (int i = 0; i < UI_RECENT_LIST_SIZE; i++, y += 11) {
+      int maxEntries = small ? 3 : UI_RECENT_LIST_SIZE;
+      int y = contentY;
+      for (int i = 0; i < maxEntries; i++, y += lineH) {
         auto a = &recent[i];
-        if (a->name[0] == 0) continue;  // empty slot
+        if (a->name[0] == 0) continue;
         int secs = _rtc->getCurrentTime() - a->recv_timestamp;
         if (secs < 60) {
           sprintf(tmp, "%ds", secs);
@@ -254,52 +287,52 @@ public:
         } else {
           sprintf(tmp, "%dh", secs / (60*60));
         }
-
         int timestamp_width = display.getTextWidth(tmp);
         int max_name_width = display.width() - timestamp_width - 1;
-
         char filtered_recent_name[sizeof(a->name)];
         display.translateUTF8ToBlocks(filtered_recent_name, a->name, sizeof(filtered_recent_name));
         display.drawTextEllipsized(0, y, max_name_width, filtered_recent_name);
         display.setCursor(display.width() - timestamp_width - 1, y);
         display.print(tmp);
       }
+
     } else if (_page == HomePage::RADIO) {
       display.setColor(DisplayDriver::YELLOW);
       display.setTextSize(1);
-      // freq / sf
-      display.setCursor(0, 20);
-      sprintf(tmp, "FQ: %06.3f   SF: %d", _node_prefs->freq, _node_prefs->sf);
-      display.print(tmp);
+      int y = contentY;
+      const char* fmts[] = {
+        small ? "%06.3f SF%d"  : "FQ: %06.3f   SF: %d",
+        small ? "%03.2f CR%d"  : "BW: %03.2f     CR: %d",
+        small ? "%ddBm"        : "TX: %ddBm",
+        small ? "NF:%d"        : "Noise floor: %d",
+      };
+      sprintf(tmp, fmts[0], _node_prefs->freq, _node_prefs->sf);
+      display.setCursor(0, y); display.print(tmp); y += lineH;
+      sprintf(tmp, fmts[1], _node_prefs->bw, _node_prefs->cr);
+      display.setCursor(0, y); display.print(tmp); y += lineH;
+      sprintf(tmp, fmts[2], _node_prefs->tx_power_dbm);
+      display.setCursor(0, y); display.print(tmp); y += lineH;
+      sprintf(tmp, fmts[3], radio_driver.getNoiseFloor());
+      display.setCursor(0, y); display.print(tmp);
 
-      display.setCursor(0, 31);
-      sprintf(tmp, "BW: %03.2f     CR: %d", _node_prefs->bw, _node_prefs->cr);
-      display.print(tmp);
-
-      // tx power,  noise floor
-      display.setCursor(0, 42);
-      sprintf(tmp, "TX: %ddBm", _node_prefs->tx_power_dbm);
-      display.print(tmp);
-      display.setCursor(0, 53);
-      sprintf(tmp, "Noise floor: %d", radio_driver.getNoiseFloor());
-      display.print(tmp);
     } else if (_page == HomePage::BLUETOOTH) {
       display.setColor(DisplayDriver::GREEN);
-      display.drawXbm((display.width() - 32) / 2, 18,
+      drawPageIcon(display, _task->isSerialEnabled() ? "BT: ON" : "BT: OFF",
           _task->isSerialEnabled() ? bluetooth_on : bluetooth_off,
-          32, 32);
-      display.setTextSize(1);
-      display.drawTextCentered(display.width() / 2, display.height() - 11, "toggle: " PRESS_LABEL);
+          small, contentY, lineH);
+      drawFooterAction(display, "toggle:", small, footerY, lineH);
+
     } else if (_page == HomePage::ADVERT) {
       display.setColor(DisplayDriver::GREEN);
-      display.setTextSize(1);
-      display.drawXbm((display.width() - 32) / 2, 18, advert_icon, 32, 32);
-      display.drawTextCentered(display.width() / 2, display.height() - 11, "advert: " PRESS_LABEL);
+      drawPageIcon(display, "ADVERT", advert_icon, small, contentY, lineH);
+      drawFooterAction(display, "advert:", small, footerY, lineH);
+
 #if ENV_INCLUDE_GPS == 1
     } else if (_page == HomePage::GPS) {
       LocationProvider* nmea = sensors.getLocationProvider();
       char buf[50];
-      int y = 18;
+      int y = contentY;
+      int step = small ? 9 : 12;
       bool gps_state = _task->getGPSState();
 #ifdef PIN_GPS_SWITCH
       bool hw_gps_state = digitalRead(PIN_GPS_SWITCH);
@@ -313,33 +346,33 @@ public:
 #endif
       display.drawTextLeftAlign(0, y, buf);
       if (nmea == NULL) {
-        y = y + 12;
+        y += step;
         display.drawTextLeftAlign(0, y, "Can't access GPS");
       } else {
-        strcpy(buf, nmea->isValid()?"fix":"no fix");
-        display.drawTextRightAlign(display.width()-1, y, buf);
-        y = y + 12;
+        strcpy(buf, nmea->isValid() ? "fix" : "no fix");
+        display.drawTextRightAlign(display.width() - 1, y, buf);
+        y += step;
         display.drawTextLeftAlign(0, y, "sat");
         sprintf(buf, "%d", nmea->satellitesCount());
-        display.drawTextRightAlign(display.width()-1, y, buf);
-        y = y + 12;
+        display.drawTextRightAlign(display.width() - 1, y, buf);
+        y += step;
         display.drawTextLeftAlign(0, y, "pos");
-        sprintf(buf, "%.4f %.4f",
-          nmea->getLatitude()/1000000., nmea->getLongitude()/1000000.);
-        display.drawTextRightAlign(display.width()-1, y, buf);
-        y = y + 12;
+        sprintf(buf, small ? "%.2f %.2f" : "%.4f %.4f",
+          nmea->getLatitude() / 1000000., nmea->getLongitude() / 1000000.);
+        display.drawTextRightAlign(display.width() - 1, y, buf);
+        y += step;
         display.drawTextLeftAlign(0, y, "alt");
-        sprintf(buf, "%.2f", nmea->getAltitude()/1000.);
-        display.drawTextRightAlign(display.width()-1, y, buf);
-        y = y + 12;
+        sprintf(buf, "%.2f", nmea->getAltitude() / 1000.);
+        display.drawTextRightAlign(display.width() - 1, y, buf);
       }
 #endif
 #if UI_SENSORS_PAGE == 1
     } else if (_page == HomePage::SENSORS) {
-      int y = 18;
+      int y = contentY;
       refresh_sensors();
       char buf[30];
       char name[30];
+      int maxRows = (display.height() - contentY) / lineH;
       LPPReader r(sensors_lpp.getBuffer(), sensors_lpp.getSize());
 
       for (int i = 0; i < sensors_scroll_offset; i++) {
@@ -348,9 +381,10 @@ public:
         r.skipData(type);
       }
 
-      for (int i = 0; i < (sensors_scroll?UI_RECENT_LIST_SIZE:sensors_nb); i++) {
+      int visibleCount = sensors_scroll ? min(sensors_nb, maxRows) : sensors_nb;
+      for (int i = 0; i < visibleCount; i++) {
         uint8_t channel, type;
-        if (!r.readHeader(channel, type)) { // reached end, reset
+        if (!r.readHeader(channel, type)) {
           r.reset();
           r.readHeader(channel, type);
         }
@@ -358,11 +392,12 @@ public:
         display.setCursor(0, y);
         float v;
         switch (type) {
-          case LPP_GPS: // GPS
+          case LPP_GPS: {
             float lat, lon, alt;
             r.readGPS(lat, lon, alt);
             strcpy(name, "gps"); sprintf(buf, "%.4f %.4f", lat, lon);
             break;
+          }
           case LPP_VOLTAGE:
             r.readVoltage(v);
             strcpy(name, "voltage"); sprintf(buf, "%6.2f", v);
@@ -397,23 +432,21 @@ public:
         }
         display.setCursor(0, y);
         display.print(name);
-        display.setCursor(
-          display.width()-display.getTextWidth(buf)-1, y
-        );
+        display.setCursor(display.width() - display.getTextWidth(buf) - 1, y);
         display.print(buf);
-        y = y + 12;
+        y += lineH;
       }
-      if (sensors_scroll) sensors_scroll_offset = (sensors_scroll_offset+1)%sensors_nb;
+      if (sensors_scroll) sensors_scroll_offset = (sensors_scroll_offset + 1) % sensors_nb;
       else sensors_scroll_offset = 0;
 #endif
     } else if (_page == HomePage::SHUTDOWN) {
       display.setColor(DisplayDriver::GREEN);
       display.setTextSize(1);
       if (_shutdown_init) {
-        display.drawTextCentered(display.width() / 2, 34, "hibernating...");
+        display.drawTextCentered(display.width() / 2, display.height() / 2 - 4, "hibernating...");
       } else {
-        display.drawXbm((display.width() - 32) / 2, 18, power_icon, 32, 32);
-        display.drawTextCentered(display.width() / 2, display.height() - 11, "hibernate:" PRESS_LABEL);
+        drawPageIcon(display, "POWER OFF", power_icon, small, contentY, lineH);
+        drawFooterAction(display, "hibernate:", small, footerY, lineH);
       }
     }
     return 5000;   // next render after 5000 ms
@@ -456,217 +489,12 @@ public:
 #endif
 #if UI_SENSORS_PAGE == 1
     if (c == KEY_ENTER && _page == HomePage::SENSORS) {
-      next_sensors_refresh = 0;
+      next_sensors_refresh=0;
       return true;
     }
 #endif
     if (c == KEY_ENTER && _page == HomePage::SHUTDOWN) {
       _shutdown_init = true;  // need to wait for button to be released
-      return true;
-    }
-    return false;
-  }
-};
-
-// Purpose-built screen for small displays (64x48 and similar).
-// Text-only, no icons, no header chrome — just content.
-class SmallHomeScreen : public HomeScreen {
-  enum SmallPage {
-    S_STATUS,
-    S_RADIO,
-    S_BLUETOOTH,
-    S_ADVERT,
-#if ENV_INCLUDE_GPS == 1
-    S_GPS,
-#endif
-#if UI_SENSORS_PAGE == 1
-    S_SENSORS,
-#endif
-    S_SHUTDOWN,
-    S_Count
-  };
-  uint8_t _spage;
-
-public:
-  SmallHomeScreen(UITask* task, mesh::RTCClock* rtc, SensorManager* sensors, NodePrefs* node_prefs)
-    : HomeScreen(task, rtc, sensors, node_prefs), _spage(0) {}
-
-  int render(DisplayDriver& display) override {
-    char tmp[40];
-    int mid = display.width() / 2;
-    int y = 0;
-    int lineH = 10;   // default font is 6x8, +2px gap
-    display.setTextSize(1);
-
-    if (_spage == S_STATUS) {
-      // battery % top-right
-      sprintf(tmp, "%d%%", batteryPercent(_task->getBattMilliVolts()));
-      display.setColor(DisplayDriver::GREEN);
-      display.drawTextRightAlign(display.width() - 1, y, tmp);
-#ifdef PIN_BUZZER
-      if (_task->isBuzzerQuiet()) {
-        display.setColor(DisplayDriver::RED);
-        display.setCursor(0, y); display.print("MUTE");
-      }
-#endif
-      // message count
-      y += lineH;
-      display.setColor(DisplayDriver::YELLOW);
-      sprintf(tmp, "MSG: %d", _task->getMsgCount());
-      display.setCursor(0, y); display.print(tmp);
-
-      // connection status
-      y += lineH;
-      if (_task->hasConnection()) {
-        display.setColor(DisplayDriver::GREEN);
-        display.setCursor(0, y); display.print("Connected");
-      } else if (the_mesh.getBLEPin() != 0) {
-        display.setColor(DisplayDriver::RED);
-        sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
-        display.setCursor(0, y); display.print(tmp);
-      }
-
-      // IP address if WiFi
-#ifdef WIFI_SSID
-      IPAddress ip = WiFi.localIP();
-      snprintf(tmp, sizeof(tmp), "%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
-      display.setColor(DisplayDriver::LIGHT);
-      display.setCursor(0, display.height() - lineH); display.print(tmp);
-#endif
-
-    } else if (_spage == S_RADIO) {
-      display.setColor(DisplayDriver::YELLOW);
-      sprintf(tmp, "%.3f", _node_prefs->freq);
-      display.setCursor(0, y); display.print(tmp);
-      y += lineH;
-      sprintf(tmp, "SF%d BW%.0f", _node_prefs->sf, _node_prefs->bw);
-      display.setCursor(0, y); display.print(tmp);
-      y += lineH;
-      sprintf(tmp, "CR%d TX%ddB", _node_prefs->cr, _node_prefs->tx_power_dbm);
-      display.setCursor(0, y); display.print(tmp);
-      y += lineH;
-      sprintf(tmp, "Noise:%d", radio_driver.getNoiseFloor());
-      display.setCursor(0, y); display.print(tmp);
-
-    } else if (_spage == S_BLUETOOTH) {
-      display.setColor(DisplayDriver::GREEN);
-      y += lineH;
-      display.drawTextCentered(mid, y,
-          _task->isSerialEnabled() ? "BT: ON" : "BT: OFF");
-      display.drawTextCentered(mid, display.height() - lineH, "click:tog");
-
-    } else if (_spage == S_ADVERT) {
-      display.setColor(DisplayDriver::GREEN);
-      y += lineH;
-      display.drawTextCentered(mid, y, "Advertise");
-      display.drawTextCentered(mid, display.height() - lineH, "click:send");
-
-#if ENV_INCLUDE_GPS == 1
-    } else if (_spage == S_GPS) {
-      LocationProvider* nmea = _sensors->getLocationProvider();
-      bool gps_state = _task->getGPSState();
-      display.setCursor(0, y);
-      display.print(gps_state ? "GPS: ON" : "GPS: OFF");
-      if (nmea != NULL) {
-        y += lineH;
-        sprintf(tmp, nmea->isValid() ? "Fix s:%d" : "NoFx s:%d", nmea->satellitesCount());
-        display.setCursor(0, y); display.print(tmp);
-        if (nmea->isValid()) {
-          y += lineH;
-          sprintf(tmp, "%.4f", nmea->getLatitude()/1000000.);
-          display.setCursor(0, y); display.print(tmp);
-          y += lineH;
-          sprintf(tmp, "%.4f", nmea->getLongitude()/1000000.);
-          display.setCursor(0, y); display.print(tmp);
-        }
-      }
-#endif
-
-#if UI_SENSORS_PAGE == 1
-    } else if (_spage == S_SENSORS) {
-      refresh_sensors();
-      char buf[12]; char name[4];
-      LPPReader r(sensors_lpp.getBuffer(), sensors_lpp.getSize());
-      for (int i = 0; i < sensors_scroll_offset; i++) {
-        uint8_t ch, tp; r.readHeader(ch, tp); r.skipData(tp);
-      }
-      int maxRows = display.height() / lineH;
-      for (int i = 0; i < (sensors_scroll ? maxRows : sensors_nb) && y + lineH <= display.height(); i++) {
-        uint8_t ch, tp;
-        if (!r.readHeader(ch, tp)) { r.reset(); r.readHeader(ch, tp); }
-        float v;
-        switch (tp) {
-          case LPP_VOLTAGE: r.readVoltage(v); strcpy(name,"V"); sprintf(buf,"%.2f",v); break;
-          case LPP_TEMPERATURE: r.readTemperature(v); strcpy(name,"T"); sprintf(buf,"%.1f",v); break;
-          case LPP_RELATIVE_HUMIDITY: r.readRelativeHumidity(v); strcpy(name,"H"); sprintf(buf,"%.0f%%",v); break;
-          case LPP_BAROMETRIC_PRESSURE: r.readPressure(v); strcpy(name,"P"); sprintf(buf,"%.0f",v); break;
-          default: r.skipData(tp); strcpy(name,"?"); buf[0]=0;
-        }
-        display.setCursor(0, y); display.print(name);
-        display.drawTextRightAlign(display.width() - 1, y, buf);
-        y += lineH;
-      }
-      if (sensors_scroll) sensors_scroll_offset = (sensors_scroll_offset+1)%sensors_nb;
-      else sensors_scroll_offset = 0;
-#endif
-
-    } else if (_spage == S_SHUTDOWN) {
-      display.setColor(DisplayDriver::GREEN);
-      if (_shutdown_init) {
-        y += lineH;
-        display.drawTextCentered(mid, y, "Shutting");
-        y += lineH;
-        display.drawTextCentered(mid, y, "down...");
-      } else {
-        y += lineH;
-        display.drawTextCentered(mid, y, "Power Off");
-        display.drawTextCentered(mid, display.height() - lineH, "click:off");
-      }
-    }
-
-    return 5000;
-  }
-
-  bool handleInput(char c) override {
-    if (c == KEY_LEFT || c == KEY_PREV) {
-      _spage = (_spage + S_Count - 1) % S_Count;
-      return true;
-    }
-    if (c == KEY_NEXT || c == KEY_RIGHT) {
-      _spage = (_spage + 1) % S_Count;
-      return true;
-    }
-    if (c == KEY_ENTER && _spage == S_BLUETOOTH) {
-      if (_task->isSerialEnabled()) {
-        _task->disableSerial();
-      } else {
-        _task->enableSerial();
-      }
-      return true;
-    }
-    if (c == KEY_ENTER && _spage == S_ADVERT) {
-      _task->notify(UIEventType::ack);
-      if (the_mesh.advert()) {
-        _task->showAlert("Advert sent!", 1000);
-      } else {
-        _task->showAlert("Advert failed..", 1000);
-      }
-      return true;
-    }
-#if ENV_INCLUDE_GPS == 1
-    if (c == KEY_ENTER && _spage == S_GPS) {
-      _task->toggleGPS();
-      return true;
-    }
-#endif
-#if UI_SENSORS_PAGE == 1
-    if (c == KEY_ENTER && _spage == S_SENSORS) {
-      next_sensors_refresh = 0;
-      return true;
-    }
-#endif
-    if (c == KEY_ENTER && _spage == S_SHUTDOWN) {
-      _shutdown_init = true;
       return true;
     }
     return false;
@@ -725,17 +553,15 @@ public:
     display.setCursor(display.width() - display.getTextWidth(tmp) - 2, 0);
     display.print(tmp);
 
-    bool small = display.width() <= 64;
-    int sepY = small ? 9 : 11;
-    display.drawRect(0, sepY, display.width(), 1);  // horiz line
+    display.drawRect(0, 11, display.width(), 1);  // horiz line
 
-    display.setCursor(0, sepY + 3);
+    display.setCursor(0, 14);
     display.setColor(DisplayDriver::YELLOW);
     char filtered_origin[sizeof(p->origin)];
     display.translateUTF8ToBlocks(filtered_origin, p->origin, sizeof(filtered_origin));
     display.print(filtered_origin);
 
-    display.setCursor(0, sepY + 13);
+    display.setCursor(0, 25);
     display.setColor(DisplayDriver::LIGHT);
     char filtered_msg[sizeof(p->msg)];
     display.translateUTF8ToBlocks(filtered_msg, p->msg, sizeof(filtered_msg));
@@ -809,11 +635,7 @@ void UITask::begin(DisplayDriver* display, SensorManager* sensors, NodePrefs* no
   _alert_expiry = 0;
 
   splash = new SplashScreen(this);
-  if (display != NULL && display->width() <= 64) {
-    home = new SmallHomeScreen(this, &rtc_clock, sensors, node_prefs);
-  } else {
-    home = new HomeScreen(this, &rtc_clock, sensors, node_prefs);
-  }
+  home = new HomeScreen(this, &rtc_clock, sensors, node_prefs);
   msg_preview = new MsgPreviewScreen(this, &rtc_clock);
   setCurrScreen(splash);
 }
