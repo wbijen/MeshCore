@@ -68,7 +68,7 @@ public:
   int render(DisplayDriver& display) override {
     const bool small = (display.width() <= 64);
 
-    // meshcore logo — scale to fit on small screens
+    // meshcore logo
     display.setColor(DisplayDriver::BLUE);
     int logoScale = small ? 2 : 1;
     int logoDrawW = 128 / logoScale;
@@ -194,17 +194,17 @@ public:
   int render(DisplayDriver& display) override {
     char tmp[80];
 
-    // --- layout constants ---
+    // layout constants
     const bool small = (display.width() <= 64);
     const int contentY   = small ? 13 : 20;   // where content starts (below header)
     const int lineH      = small ? 9  : 11;   // vertical spacing between lines
     const int footerY    = display.height() - 9; // bottom-anchored labels
     const int dotSpacing = 10;
     const int dotY       = small ? 9 : 14;
-    const int titleSize  = small ? 1 : 2;     // text size for prominent labels
+    const int titleSize  = small ? 1 : 2;
     const int maxRecent  = min((int)UI_RECENT_LIST_SIZE, (display.height() - contentY) / lineH);
 
-    // --- header: node name (skip on small screens to save space) ---
+    // node name
     display.setTextSize(1);
     display.setColor(DisplayDriver::GREEN);
     if (!small) {
@@ -214,10 +214,10 @@ public:
       display.print(filtered_name);
     }
 
-    // --- header: battery ---
+    // battery
     renderBatteryIndicator(display, _task->getBattMilliVolts(), small);
 
-    // --- page dots ---
+    // page dots
     int dotX = display.width() / 2 - (dotSpacing / 2) * (HomePage::Count - 1);
     for (uint8_t i = 0; i < HomePage::Count; i++, dotX += dotSpacing) {
       if (i == _page) {
@@ -227,7 +227,7 @@ public:
       }
     }
 
-    // --- pages ---
+    // pages
     if (_page == HomePage::FIRST) {
       display.setColor(DisplayDriver::YELLOW);
       display.setTextSize(titleSize);
