@@ -68,10 +68,11 @@ public:
   int render(DisplayDriver& display) override {
     const bool small = (display.width() <= 64);
 
-    // meshcore logo — on small screens, draw at negative x to show center portion
+    // meshcore logo — scale to fit on small screens
     display.setColor(DisplayDriver::BLUE);
-    int logoWidth = 128;
-    display.drawXbm((display.width() - logoWidth) / 2, small ? 0 : 3, meshcore_logo, logoWidth, 13);
+    int logoScale = small ? 2 : 1;
+    int logoDrawW = 128 / logoScale;
+    display.drawXbmScaled((display.width() - logoDrawW) / 2, small ? 0 : 3, meshcore_logo, 128, 13, logoScale);
 
     // version info
     display.setColor(DisplayDriver::LIGHT);
@@ -117,62 +118,39 @@ class HomeScreen : public UIScreen {
   AdvertPath recent[UI_RECENT_LIST_SIZE];
 
 
-  void drawPageIcon(DisplayDriver& display, const char* text, const uint8_t* icon,
-                    bool small, int contentY, int lineH) {
-    if (small) {
-      display.drawTextCentered(display.width() / 2, contentY + lineH, text);
-    } else {
-      display.drawXbm((display.width() - 32) / 2, 18, icon, 32, 32);
-    }
+  void drawPageIcon(DisplayDriver& display, const uint8_t* icon, bool small, int contentY) {
+    int scale = small ? 2 : 1;
+    int drawW = 32 / scale;
+    display.drawXbmScaled((display.width() - drawW) / 2, contentY, icon, 32, 32, scale);
   }
 
-  void drawFooterAction(DisplayDriver& display, const char* label, bool small, int footerY, int lineH) {
-    if (small) {
-      display.drawTextCentered(display.width() / 2, footerY - lineH, label);
-      display.drawTextCentered(display.width() / 2, footerY, PRESS_LABEL);
-    } else {
-      char tmp[40];
-      snprintf(tmp, sizeof(tmp), "%s " PRESS_LABEL, label);
-      display.drawTextCentered(display.width() / 2, footerY, tmp);
-    }
+  void drawFooterAction(DisplayDriver& display, const char* label, bool small, int footerY) {
+    char tmp[40];
+    snprintf(tmp, sizeof(tmp), small ? PRESS_LABEL : "%s " PRESS_LABEL, label);
+    display.drawTextCentered(display.width() / 2, footerY, tmp);
   }
 
   void renderBatteryIndicator(DisplayDriver& display, uint16_t batteryMilliVolts, bool small) {
     int pct = batteryPercent(batteryMilliVolts);
     display.setColor(DisplayDriver::GREEN);
 
-    if (small) {
-      // text-only battery: right-aligned "XX%" at top
-      char buf[5];
-      sprintf(buf, "%d%%", pct);
-      display.drawTextRightAlign(display.width() - 1, 0, buf);
-#ifdef PIN_BUZZER
-      if (_task->isBuzzerQuiet()) {
-        display.setColor(DisplayDriver::RED);
-        int tw = display.getTextWidth(buf);
-        display.drawXbm(display.width() - tw - 10, 1, muted_icon, 8, 8);
-      }
-#endif
-    } else {
-      // battery icon
-      int iconWidth = 24;
-      int iconHeight = 10;
-      int iconX = display.width() - iconWidth - 5;
-      int iconY = 0;
+    int scale = small ? 2 : 1;
+    int iconW = 24 / scale, iconH = 10 / scale;
+    int pad = max(1, 2 / scale);
+    int nubW = max(1, 3 / scale);
+    int battX = display.width() - iconW - 5 / scale;
 
-      display.drawRect(iconX, iconY, iconWidth, iconHeight);
-      display.fillRect(iconX + iconWidth, iconY + (iconHeight / 4), 3, iconHeight / 2);
-
-      int fillWidth = (pct * (iconWidth - 4)) / 100;
-      display.fillRect(iconX + 2, iconY + 2, fillWidth, iconHeight - 4);
+    display.drawRect(battX, 0, iconW, iconH);
+    display.fillRect(battX + iconW, iconH / 4, nubW, iconH / 2);
+    int fillW = (pct * (iconW - pad * 2)) / 100;
+    display.fillRect(battX + pad, pad, fillW, iconH - pad * 2);
 
 #ifdef PIN_BUZZER
-      if (_task->isBuzzerQuiet()) {
-        display.setColor(DisplayDriver::RED);
-        display.drawXbm(iconX - 9, iconY + 1, muted_icon, 8, 8);
-      }
-#endif
+    if (_task->isBuzzerQuiet()) {
+      display.setColor(DisplayDriver::RED);
+      display.drawXbm(battX - 9, 1, muted_icon, 8, 8);
     }
+#endif
   }
 
   CayenneLPP sensors_lpp;
@@ -218,10 +196,13 @@ public:
 
     // --- layout constants ---
     const bool small = (display.width() <= 64);
-    const int contentY = small ? 13 : 20;   // where content starts (below header)
-    const int lineH    = small ? 9  : 11;   // vertical spacing between lines
-    const int footerY  = display.height() - 9; // bottom-anchored labels
-    const int dotSpacing = small ? 6 : 10;
+    const int contentY   = small ? 13 : 20;   // where content starts (below header)
+    const int lineH      = small ? 9  : 11;   // vertical spacing between lines
+    const int footerY    = display.height() - 9; // bottom-anchored labels
+    const int dotSpacing = 10;
+    const int dotY       = small ? 9 : 14;
+    const int titleSize  = small ? 1 : 2;     // text size for prominent labels
+    const int maxRecent  = min((int)UI_RECENT_LIST_SIZE, (display.height() - contentY) / lineH);
 
     // --- header: node name (skip on small screens to save space) ---
     display.setTextSize(1);
@@ -237,7 +218,6 @@ public:
     renderBatteryIndicator(display, _task->getBattMilliVolts(), small);
 
     // --- page dots ---
-    int dotY = small ? 9 : 14;
     int dotX = display.width() / 2 - (dotSpacing / 2) * (HomePage::Count - 1);
     for (uint8_t i = 0; i < HomePage::Count; i++, dotX += dotSpacing) {
       if (i == _page) {
@@ -250,7 +230,7 @@ public:
     // --- pages ---
     if (_page == HomePage::FIRST) {
       display.setColor(DisplayDriver::YELLOW);
-      display.setTextSize(small ? 1 : 2);
+      display.setTextSize(titleSize);
       sprintf(tmp, "MSG: %d", _task->getMsgCount());
       display.drawTextCentered(display.width() / 2, contentY, tmp);
 
@@ -266,7 +246,7 @@ public:
         display.drawTextCentered(display.width() / 2, contentY + lineH, "< Connected >");
       } else if (the_mesh.getBLEPin() != 0) {
         display.setColor(DisplayDriver::RED);
-        display.setTextSize(small ? 1 : 2);
+        display.setTextSize(titleSize);
         sprintf(tmp, "Pin:%d", the_mesh.getBLEPin());
         display.drawTextCentered(display.width() / 2, contentY + lineH, tmp);
       }
@@ -274,9 +254,8 @@ public:
     } else if (_page == HomePage::RECENT) {
       the_mesh.getRecentlyHeard(recent, UI_RECENT_LIST_SIZE);
       display.setColor(DisplayDriver::GREEN);
-      int maxEntries = small ? 3 : UI_RECENT_LIST_SIZE;
       int y = contentY;
-      for (int i = 0; i < maxEntries; i++, y += lineH) {
+      for (int i = 0; i < maxRecent; i++, y += lineH) {
         auto a = &recent[i];
         if (a->name[0] == 0) continue;
         int secs = _rtc->getCurrentTime() - a->recv_timestamp;
@@ -317,22 +296,20 @@ public:
 
     } else if (_page == HomePage::BLUETOOTH) {
       display.setColor(DisplayDriver::GREEN);
-      drawPageIcon(display, _task->isSerialEnabled() ? "BT: ON" : "BT: OFF",
-          _task->isSerialEnabled() ? bluetooth_on : bluetooth_off,
-          small, contentY, lineH);
-      drawFooterAction(display, "toggle:", small, footerY, lineH);
+      drawPageIcon(display, _task->isSerialEnabled() ? bluetooth_on : bluetooth_off,
+          small, contentY);
+      drawFooterAction(display, "toggle:", small, footerY);
 
     } else if (_page == HomePage::ADVERT) {
       display.setColor(DisplayDriver::GREEN);
-      drawPageIcon(display, "ADVERT", advert_icon, small, contentY, lineH);
-      drawFooterAction(display, "advert:", small, footerY, lineH);
+      drawPageIcon(display, advert_icon, small, contentY);
+      drawFooterAction(display, "advert:", small, footerY);
 
 #if ENV_INCLUDE_GPS == 1
     } else if (_page == HomePage::GPS) {
       LocationProvider* nmea = sensors.getLocationProvider();
       char buf[50];
       int y = contentY;
-      int step = small ? 9 : 12;
       bool gps_state = _task->getGPSState();
 #ifdef PIN_GPS_SWITCH
       bool hw_gps_state = digitalRead(PIN_GPS_SWITCH);
@@ -346,21 +323,21 @@ public:
 #endif
       display.drawTextLeftAlign(0, y, buf);
       if (nmea == NULL) {
-        y += step;
+        y += lineH;
         display.drawTextLeftAlign(0, y, "Can't access GPS");
       } else {
         strcpy(buf, nmea->isValid() ? "fix" : "no fix");
         display.drawTextRightAlign(display.width() - 1, y, buf);
-        y += step;
+        y += lineH;
         display.drawTextLeftAlign(0, y, "sat");
         sprintf(buf, "%d", nmea->satellitesCount());
         display.drawTextRightAlign(display.width() - 1, y, buf);
-        y += step;
+        y += lineH;
         display.drawTextLeftAlign(0, y, "pos");
         sprintf(buf, small ? "%.2f %.2f" : "%.4f %.4f",
           nmea->getLatitude() / 1000000., nmea->getLongitude() / 1000000.);
         display.drawTextRightAlign(display.width() - 1, y, buf);
-        y += step;
+        y += lineH;
         display.drawTextLeftAlign(0, y, "alt");
         sprintf(buf, "%.2f", nmea->getAltitude() / 1000.);
         display.drawTextRightAlign(display.width() - 1, y, buf);
@@ -445,8 +422,8 @@ public:
       if (_shutdown_init) {
         display.drawTextCentered(display.width() / 2, display.height() / 2 - 4, "hibernating...");
       } else {
-        drawPageIcon(display, "POWER OFF", power_icon, small, contentY, lineH);
-        drawFooterAction(display, "hibernate:", small, footerY, lineH);
+        drawPageIcon(display, power_icon, small, contentY);
+        drawFooterAction(display, "hibernate:", small, footerY);
       }
     }
     return 5000;   // next render after 5000 ms

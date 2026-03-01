@@ -26,6 +26,19 @@ public:
   virtual void fillRect(int x, int y, int w, int h) = 0;
   virtual void drawRect(int x, int y, int w, int h) = 0;
   virtual void drawXbm(int x, int y, const uint8_t* bits, int w, int h) = 0;
+  virtual void drawXbmScaled(int x, int y, const uint8_t* bits, int srcW, int srcH, int scale) {
+    if (scale <= 1) { drawXbm(x, y, bits, srcW, srcH); return; }
+    int dstW = srcW / scale, dstH = srcH / scale;
+    int bytesPerRow = (srcW + 7) / 8;
+    for (int dy = 0; dy < dstH; dy++) {
+      for (int dx = 0; dx < dstW; dx++) {
+        int srcX = dx * scale, srcY = dy * scale;
+        if (bits[srcY * bytesPerRow + srcX / 8] & (0x80 >> (srcX % 8))) {
+          fillRect(x + dx, y + dy, 1, 1);
+        }
+      }
+    }
+  }
   virtual uint16_t getTextWidth(const char* str) = 0;
   virtual void drawTextCentered(int mid_x, int y, const char* str) {   // helper method (override to optimise)
     int w = getTextWidth(str);
